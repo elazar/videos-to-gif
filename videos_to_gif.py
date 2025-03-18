@@ -1,6 +1,8 @@
-#!/usr/bin/python
+#!/usr/bin/python3
+# expects to be run as:
+# $ python3 videos_to_gif_python3.py video.mp4 subtitles.srt
 
-import sys, os, re, subprocess, shutil, yaml, pysrt
+import os, sys, re, subprocess, shutil, pysrt
 from PIL import Image, ImageFont, ImageDraw
 from slugify import slugify
 
@@ -24,94 +26,68 @@ def drawText(draw, x, y, text, font):
   # white text
   draw.text((x, y),text,(255,255,255),font=font)
 
-def makeGif(video, starts, ends, strings, output):
+def makeGif(video, start, end, string, output):
   if not os.path.exists(gif_dir):
     os.makedirs(gif_dir)
 
-  for index in range(0, len(starts)):
-    if not os.path.exists(directory):
-      os.makedirs(directory)
+  if not os.path.exists(directory):
+    os.makedirs(directory)
 
-    string = strings[index]
-    start = starts[index]
-    end = ends[index]
-    text = striptags(string).split("\n")
+  text = striptags(string).split("\n")
 
-    subprocess.call(['avconv', '-i', video, '-vf', 'scale=w=400:h=-1', '-r', '15', '-ss', start, '-t', end, os.path.join(directory, 'image-%05d.png')])
+  subprocess.call(['ffmpeg', '-i', video, '-vf', 'scale=w=400:h=-1', '-r', '15', '-ss', start, '-t', end, os.path.join(directory, 'image-%05d.png')])
 
-    file_names = sorted((fn for fn in os.listdir(directory)))
-    images = []
+  file_names = sorted((fn for fn in os.listdir(directory)))
 
-    for f in file_names:
-      image = Image.open(os.path.join(directory,f))
-      draw = ImageDraw.Draw(image)
+  for f in file_names:
+    print(f)
+    image = Image.open(os.path.join(directory,f))
+    draw = ImageDraw.Draw(image)
+    image_size = image.size
 
-      # reddit tells me this patten sucks, but I like it
-      try:
-        image_size
-      except NameError:
-        image_size = image.size
+    subs_num = len(text)
+    bbox = font.getbbox(text[0])
+    text_size = (bbox[2] - bbox[0], bbox[3] - bbox[1])
+    text_height = text_size[1]
+    for i in range(subs_num):
+      bbox = font.getbbox(text[i])
+      text_size = (bbox[2] - bbox[0], bbox[3] - bbox[1])
+      x = (image_size[0]/2) - (text_size[0]/2)
+      mult = subs_num - i
+      y = image_size[1] - (mult*text_height) - 5 # padding
+      drawText(draw, x, y, text[i], font)
 
-      # multiple lines in text
-      if len(text) == 2:
-        # at most 2?
-        text_size = font.getsize(text[0])
-        x = (image_size[0]/2) - (text_size[0]/2)
-        y = image_size[1] - (2*text_size[1]) - 5 # padding
-        drawText(draw, x, y, text[0], font)
+    image.save(os.path.join(directory,f))
 
-        text_size = font.getsize(text[1])
-        x = (image_size[0]/2) - (text_size[0]/2)
-        y += text_size[1]
-        drawText(draw, x, y, text[1], font)
-      else:
-        text_size = font.getsize(text[0])
-        x = (image_size[0]/2) - (text_size[0]/2)
-        y = image_size[1] - text_size[1] - 5 # padding
-        drawText(draw, x, y, text[0], font)
-
-      image.save(os.path.join(directory,f))
-
-    subprocess.call(["convert", '-loop', '0', os.path.join(directory, '*.png'), os.path.join(gif_dir, "temp"+str(index)+".gif")])
-    shutil.rmtree(directory)
-  
-  subprocess.call(["convert", '-loop', '0', os.path.join(gif_dir, '*.gif'), output])
-  shutil.rmtree(gif_dir)
+  subprocess.call(["magick", '-loop', '0', os.path.join(directory, '*.png'), output])
+  shutil.rmtree(directory)
   
 
-def generateAllGifs():
-  stream = file('files.yml', 'r')
-  data = yaml.load(stream)
-  
-  if "outpath" in data:
-    outpath = data["outpath"]
-  else:
-    outpath = ""
+def generateGifs(video_file_path, sub_file_path, index):
+  outpath = "gifs"
 
-  for file_data in data["files"]:
-    video_file_path = file_data["video"]
-    sub_file_path = file_data["subs"]
+  subs = pysrt.open(sub_file_path, encoding="utf-8")
 
-    if "encoding" in file_data:
-      sub_encoding = file_data["encoding"]
+  # generate a gif for every line of dialogue
+  for i, sub in enumerate(subs):
+    if index != None and i != index - 1:
+      continue
+
+    # 00:00:00,000 => 00:00:00.000
+    start = str(sub.start).replace(',', '.')
+    end = str(sub.end - sub.start).replace(',', '.')
+
+    gif_filename = os.path.join(outpath, f'{i:06}-{slugify(striptags(sub.text))}.gif')
+    
+    if os.path.isfile(gif_filename):
+      next
     else:
-      sub_encoding = "utf-8"
+      print("generating " + gif_filename + "...")
+      makeGif(video_file_path, start, end, sub.text, gif_filename)
 
-    subs = pysrt.open(sub_file_path, encoding=sub_encoding)
-
-    # generate a gif for every line of dialogue
-    for sub in subs:
-      # 00:00:00,000 => 00:00:00.000
-      start = str(sub.start).replace(',', '.')
-      end = str(sub.end - sub.start).replace(',', '.')
-
-      gif_filename = os.path.join(outpath, slugify(sub.text) + ".gif")
-      
-      if os.path.isfile(gif_filename):
-        next
-      else:
-        print "generating " + gif_filename + "..."
-        makeGif(video_file_path, start, end, sub.text, gif_filename)
+    if index != None:
+      break
 
 if __name__ == '__main__':
-  generateAllGifs()
+  index = int(sys.argv[3]) if len(sys.argv) > 3 else None
+  generateGifs(sys.argv[1], sys.argv[2], index)

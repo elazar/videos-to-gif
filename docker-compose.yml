@@ -1,0 +1,9 @@
+services:
+  python:
+    build:
+      context: .
+      dockerfile: ./docker/python/Dockerfile
+    working_dir: /app
+    volumes:
+      - .:/app
+      - /volume1/video:/video
